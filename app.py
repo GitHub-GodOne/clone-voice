@@ -24,6 +24,7 @@ import video_processor
 load_dotenv()
 
 web_address = os.getenv('WEB_ADDRESS', '127.0.0.1:9988')
+respon_host = os.getenv('RESPON_HOST', f'http://{web_address}')
 enable_sts = int(os.getenv('ENABLE_STS', '0'))
 
 
@@ -224,7 +225,7 @@ def apitts():
             result = msg
             app.logger.info(f"[apitts]{msg=}")
         if result['code'] == 0:
-            result['url'] = f'http://{web_address}/static/ttslist/{filename}'
+            result['url'] = f'{respon_host}/static/ttslist/{filename}'
         return jsonify(result)
     except Exception as e:
         msg = f'{str(e)} {str(e.args)}'
@@ -336,7 +337,7 @@ def tts():
             "filename": filename,
             "name": basename,
             "msg": errors,
-            "url": f'http://{web_address}/static/ttslist/{basename}'
+            "url": f'{respon_host}/static/ttslist/{basename}'
         }
     else:
         res = {"code": 1, "msg": f"error:{filename=},{errors=}"}
@@ -515,7 +516,7 @@ def process_video():
             'code': 0,
             'msg': 'success',
             'filename': output_filename,
-            'url': f'http://{web_address}/static/ttslist/{output_filename}',
+            'url': f'{respon_host}/static/ttslist/{output_filename}',
             'is_video': True
         })
 
