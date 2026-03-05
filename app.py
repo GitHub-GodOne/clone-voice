@@ -447,6 +447,7 @@ def process_video():
             title_end = float(request.form.get('title_end', 10.0))
             max_words_per_line = int(request.form.get('max_words_per_line', 30))
             long_token_dur_s = float(request.form.get('long_token_dur_s', 2.0))
+            loop_video = request.form.get('loop_video', '1') == '1'
             app.logger.info(f"[process_video] Parameters parsed successfully")
         except Exception as e:
             app.logger.error(f"[process_video] Error parsing parameters: {str(e)}")
@@ -497,7 +498,8 @@ def process_video():
                 long_token_dur_s=long_token_dur_s,
                 title=title if title else None,
                 title_start=title_start,
-                title_end=title_end
+                title_end=title_end,
+                loop_video=loop_video
             )
             app.logger.info(f"[process_video] Video processing completed successfully")
 

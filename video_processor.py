@@ -133,31 +133,78 @@ def merge_audio_with_bgm(
 
 
 def add_subtitles_and_audio_to_video(
-    video_path: str, audio_path: str, ass_file: str, output_path: str
+    video_path: str, audio_path: str, ass_file: str, output_path: str, loop_video: bool = True
 ) -> str:
-    """将字幕和音频添加到视频中"""
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        video_path,
-        "-i",
-        audio_path,
-        "-vf",
-        f"ass={ass_file}",
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        "-shortest",
-        output_path,
-    ]
+    """将字幕和音频添加到视频中，可选择循环视频以匹配音频时长"""
+
+    if loop_video:
+        # 获取音频和视频时长
+        audio_duration_cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", audio_path
+        ]
+        video_duration_cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", video_path
+        ]
+
+        audio_duration = float(subprocess.check_output(audio_duration_cmd, text=True).strip())
+        video_duration = float(subprocess.check_output(video_duration_cmd, text=True).strip())
+
+        print(f"音频时长: {audio_duration:.2f}s, 视频时长: {video_duration:.2f}s")
+
+        if audio_duration > video_duration:
+            # 需要循环视频
+            loop_count = int(audio_duration / video_duration) + 1
+            print(f"循环视频 {loop_count} 次以匹配音频时长")
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-stream_loop", str(loop_count),
+                "-i", video_path,
+                "-i", audio_path,
+                "-vf", f"ass={ass_file}",
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-shortest",
+                output_path,
+            ]
+        else:
+            # 视频时长足够，使用原逻辑
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", video_path,
+                "-i", audio_path,
+                "-vf", f"ass={ass_file}",
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-shortest",
+                output_path,
+            ]
+    else:
+        # 不循环，使用原逻辑
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-vf", f"ass={ass_file}",
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-shortest",
+            output_path,
+        ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -180,6 +227,7 @@ def process_video_with_subtitles(
     title: Optional[str] = None,
     title_start: float = 0.0,
     title_end: float = 10.0,
+    loop_video: bool = True,
 ) -> str:
     """完整的视频处理流程：生成字幕、合并音频、添加到视频"""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,6 +268,7 @@ def process_video_with_subtitles(
             audio_path=final_audio,
             ass_file=ass_file,
             output_path=output_path,
+            loop_video=loop_video,
         )
 
         print(f"✅ 视频生成完成: {result_path}")

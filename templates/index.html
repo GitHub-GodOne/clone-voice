@@ -350,6 +350,12 @@
                     <label class="form-label" data-en="Title End (seconds):" data-cn="标题结束时间(秒):"></label>
                     <input type="number" class="form-control" id="titleEnd" value="10" step="0.1" min="0">
                 </div>
+                <div class="col-md-4">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" id="loopVideo" checked>
+                        <label class="form-check-label" for="loopVideo" data-en="Loop video to match audio duration" data-cn="循环视频以匹配音频时长"></label>
+                    </div>
+                </div>
             </div>
             <div class="row mt-3">
                 <div class="col-md-12">
@@ -764,6 +770,7 @@
         formData.append('title', $('#videoTitle').val());
         formData.append('title_start', $('#titleStart').val());
         formData.append('title_end', $('#titleEnd').val());
+        formData.append('loop_video', $('#loopVideo').is(':checked') ? '1' : '0');
 
         $('#tips').removeClass('d-none').text(language === 'zh' ? '视频处理中，请耐心等待...' : 'Processing video, please wait...');
         $(el).attr('disabled', 'disabled');
