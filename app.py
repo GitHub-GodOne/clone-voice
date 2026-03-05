@@ -588,11 +588,17 @@ def tts_async():
 # ==================== 视频处理异步接口 ====================
 @app.route('/process_video_async', methods=['POST'])
 def process_video_async():
-    """异步视频处理接口，立即返回task_id，后台处理任务"""
+    """异步视频处理接口，支持文件上传或URL下载"""
     try:
+        # 支持两种方式：文件上传 或 URL
         video_file = request.files.get('video')
         audio_file = request.files.get('audio')
         bgm_file = request.files.get('bgm')
+
+        video_url = request.form.get('video_url', '').strip()
+        audio_url = request.form.get('audio_url', '').strip()
+        bgm_url = request.form.get('bgm_url', '').strip()
+
         text_content = request.form.get('text_content', '').strip()
 
         try:
@@ -608,23 +614,39 @@ def process_video_async():
         except Exception as e:
             return jsonify({'code': 1, 'msg': f'Parameter error: {str(e)}'})
 
-        if not video_file or not audio_file or not text_content:
-            return jsonify({'code': 1, 'msg': 'video/audio/text content required'})
+        # 检查是否提供了视频和音频（文件或URL）
+        if not (video_file or video_url) or not (audio_file or audio_url) or not text_content:
+            return jsonify({'code': 1, 'msg': 'video/audio/text content required (file or url)'})
 
-        # 保存上传的文件到临时目录（需要在主线程中完成，因为request上下文在子线程不可用）
+        # 创建临时目录
         import tempfile
         from pathlib import Path
         temp_dir = Path(tempfile.mkdtemp())
 
-        video_path = temp_dir / video_file.filename
-        audio_path = temp_dir / audio_file.filename
-        video_file.save(str(video_path))
-        audio_file.save(str(audio_path))
+        # 处理视频文件
+        if video_file:
+            video_path = temp_dir / video_file.filename
+            video_file.save(str(video_path))
+        else:
+            video_path = temp_dir / "video.mp4"
+            # URL 下载将在后台线程中进行
 
+        # 处理音频文件
+        if audio_file:
+            audio_path = temp_dir / audio_file.filename
+            audio_file.save(str(audio_path))
+        else:
+            audio_path = temp_dir / "audio.wav"
+            # URL 下载将在后台线程中进行
+
+        # 处理背景音乐
         bgm_path = None
         if bgm_file:
             bgm_path = temp_dir / bgm_file.filename
             bgm_file.save(str(bgm_path))
+        elif bgm_url:
+            bgm_path = temp_dir / "bgm.mp3"
+            # URL 下载将在后台线程中进行
 
         output_filename = f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
         output_path = os.path.join(TTS_DIR, output_filename)
@@ -632,10 +654,33 @@ def process_video_async():
         task_id = create_task('process_video')
         update_task_status(task_id, 'processing')
 
-        def run_video_task(task_id, video_path, audio_path, text_content, output_path, output_filename,
-                           language, bgm_path, bgm_volume, voice_volume, max_words_per_line,
-                           long_token_dur_s, title, title_start, title_end, loop_video, temp_dir):
+        def download_file(url, save_path):
+            """从URL下载文件"""
+            import requests
+            response = requests.get(url, stream=True, timeout=300)
+            response.raise_for_status()
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+        def run_video_task(task_id, video_path, audio_path, video_url, audio_url, bgm_path, bgm_url,
+                           text_content, output_path, output_filename, language, bgm_volume, voice_volume,
+                           max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video, temp_dir):
             try:
+                # 如果是URL，先下载文件
+                if video_url:
+                    app.logger.info(f"[process_video_async] Downloading video from {video_url}")
+                    download_file(video_url, str(video_path))
+
+                if audio_url:
+                    app.logger.info(f"[process_video_async] Downloading audio from {audio_url}")
+                    download_file(audio_url, str(audio_path))
+
+                if bgm_url and bgm_path:
+                    app.logger.info(f"[process_video_async] Downloading bgm from {bgm_url}")
+                    download_file(bgm_url, str(bgm_path))
+
+                # 处理视频
                 video_processor.process_video_with_subtitles(
                     video_path=str(video_path),
                     audio_path=str(audio_path),
@@ -664,12 +709,14 @@ def process_video_async():
             except Exception as e:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 app.logger.error(f"[process_video_async] task {task_id} error: {str(e)}")
+                import traceback
+                app.logger.error(f"[process_video_async] traceback: {traceback.format_exc()}")
                 update_task_status(task_id, 'failed', error=f'Processing failed: {str(e)}')
 
         threading.Thread(target=run_video_task, args=(
-            task_id, video_path, audio_path, text_content, output_path, output_filename,
-            language, bgm_path, bgm_volume, voice_volume, max_words_per_line,
-            long_token_dur_s, title, title_start, title_end, loop_video, temp_dir
+            task_id, video_path, audio_path, video_url, audio_url, bgm_path, bgm_url,
+            text_content, output_path, output_filename, language, bgm_volume, voice_volume,
+            max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video, temp_dir
         ), daemon=True).start()
 
         return jsonify({

@@ -17,15 +17,23 @@ VIDEO_FILE = "/Users/pikju/program/python/clone-voice/video/input.mp4"
 AUDIO_FILE = "/Users/pikju/program/python/clone-voice/video/voice.wav"
 BGM_FILE = "/Users/pikju/program/python/clone-voice/video/mucis.mp3"  # 可选
 
+# 测试 URL（如果使用 URL 方式）
+VIDEO_URL = ""  # 例如: "https://example.com/video.mp4"
+AUDIO_URL = ""  # 例如: "https://example.com/audio.wav"
+BGM_URL = ""    # 例如: "https://example.com/bgm.mp3"
+
 # 测试文本
 TEXT_CONTENT = (
     """So do not fear,for I am with you;do not be dismayed for I am your God."""
 )
 
+# 选择提交方式: 'file' 或 'url'
+SUBMIT_MODE = 'file'  # 改为 'url' 使用 URL 方式
 
-def submit_video_task():
-    """提交视频处理任务"""
-    print("📤 提交视频处理任务...")
+
+def submit_video_task_by_file():
+    """通过文件上传方式提交视频处理任务"""
+    print("📤 提交视频处理任务（文件上传方式）...")
 
     url = f"{API_BASE_URL}/process_video_async"
 
@@ -60,6 +68,50 @@ def submit_video_task():
         # 关闭文件
         for f in files.values():
             f.close()
+
+        if result['code'] == 0:
+            print(f"✅ 任务提交成功！")
+            print(f"   Task ID: {result['task_id']}")
+            print(f"   提示: {result['msg']}")
+            return result['task_id']
+        else:
+            print(f"❌ 任务提交失败: {result['msg']}")
+            return None
+
+    except Exception as e:
+        print(f"❌ 请求失败: {str(e)}")
+        return None
+
+
+def submit_video_task_by_url():
+    """通过 URL 方式提交视频处理任务（更快，推荐）"""
+    print("📤 提交视频处理任务（URL 方式）...")
+
+    url = f"{API_BASE_URL}/process_video_async"
+
+    # 准备参数（使用 URL 而不是文件上传）
+    data = {
+        'video_url': VIDEO_URL,
+        'audio_url': AUDIO_URL,
+        'text_content': TEXT_CONTENT,
+        'language': 'en',
+        'bgm_volume': '5',
+        'voice_volume': '1.0',
+        'max_words_per_line': '10',
+        'long_token_dur_s': '0.8',
+        'title': '测试标题',
+        'title_start': '0',
+        'title_end': '100',
+        'loop_video': '1',  # 1=循环视频，0=不循环
+    }
+
+    # 可选：添加背景音乐 URL
+    if BGM_URL:
+        data['bgm_url'] = BGM_URL
+
+    try:
+        response = requests.post(url, data=data)
+        result = response.json()
 
         if result['code'] == 0:
             print(f"✅ 任务提交成功！")
@@ -147,17 +199,24 @@ def main():
     print("视频处理异步接口测试")
     print("=" * 60)
 
-    # 检查文件是否存在
-    if not os.path.exists(VIDEO_FILE):
-        print(f"❌ 视频文件不存在: {VIDEO_FILE}")
-        return
+    # 根据模式选择提交方式
+    if SUBMIT_MODE == 'url':
+        print(f"📌 使用 URL 方式提交（更快）")
+        if not VIDEO_URL or not AUDIO_URL:
+            print(f"❌ 请配置 VIDEO_URL 和 AUDIO_URL")
+            return
+        task_id = submit_video_task_by_url()
+    else:
+        print(f"📌 使用文件上传方式提交")
+        # 检查文件是否存在
+        if not os.path.exists(VIDEO_FILE):
+            print(f"❌ 视频文件不存在: {VIDEO_FILE}")
+            return
+        if not os.path.exists(AUDIO_FILE):
+            print(f"❌ 音频文件不存在: {AUDIO_FILE}")
+            return
+        task_id = submit_video_task_by_file()
 
-    if not os.path.exists(AUDIO_FILE):
-        print(f"❌ 音频文件不存在: {AUDIO_FILE}")
-        return
-
-    # 1. 提交任务
-    task_id = submit_video_task()
     if task_id is None:
         return
 
