@@ -16,21 +16,35 @@
 import requests
 import time
 
+import requests
+import time
+
 # 1. 提交异步TTS任务
-# res = requests.post(
-#     "http://localhost:9988/tts_async",
-#     data={"text": "hello everyone", "voice": "output.wav", "language": "en"},
-# )
-# task_id = res.json()
-# print(task_id)
+res = requests.post(
+    "https://clonevoice.nailai.net/tts_async",
+    data={"text": "hello everyone", "voice": "output.wav", "language": "en"},
+)
+task_id = res.json()["task_id"]
 
 # 2. 轮询查询状态
-# while True:
-status = requests.get(
-    f"http://localhost:9988/task_status/0db6528a-e7e3-4d9a-a643-919907f5a36f"
-).json()
-print(status)
-#     if status["status"] in ("completed", "failed"):
-#         print(status)
-#         break
-#     time.sleep(3)  # 每3秒查一次
+while True:
+    status = requests.get(f"https://clonevoice.nailai.net/task_status/{task_id}").json()
+    if status["status"] in ("completed", "failed"):
+        print(status)
+        break
+    time.sleep(3)  # 每3秒查一次
+# 响应
+{
+    'code': 0,
+    'error': None,
+    'result': {
+        'code': 0,
+        'filename': '/Users/apple/Documents/python/clone-voice/static/ttslist/7ba525aa30052c0b3afff1cbfa388b90.wav',
+        'msg': '',
+        'name': '7ba525aa30052c0b3afff1cbfa388b90.wav',
+        'url': 'https://clonevoice.nailai.net/static/ttslist/7ba525aa30052c0b3afff1cbfa388b90.wav',
+    },
+    'status': 'completed',
+    'task_id': '701613c6-2c93-4a20-81f0-efa9b2e70b3f',
+    'type': 'tts',
+}

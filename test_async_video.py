@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+测试异步视频处理接口
+"""
+
+import requests
+import time
+import os
+
+# 配置
+API_BASE_URL = "https://clonevoice.nailai.net"
+# API_BASE_URL = "http://127.0.0.1:9988"  # 本地测试
+
+# 测试文件路径（请根据实际情况修改）
+VIDEO_FILE = "/Users/pikju/program/python/clone-voice/video/input.mp4"
+AUDIO_FILE = "/Users/pikju/program/python/clone-voice/video/voice.wav"
+BGM_FILE = "/Users/pikju/program/python/clone-voice/video/mucis.mp3"  # 可选
+
+# 测试文本
+TEXT_CONTENT = (
+    """So do not fear,for I am with you;do not be dismayed for I am your God."""
+)
+
+
+def submit_video_task():
+    """提交视频处理任务"""
+    print("📤 提交视频处理任务...")
+
+    url = f"{API_BASE_URL}/process_video_async"
+
+    # 准备文件
+    files = {
+        'video': open(VIDEO_FILE, 'rb'),
+        'audio': open(AUDIO_FILE, 'rb'),
+    }
+
+    # 可选：添加背景音乐
+    if os.path.exists(BGM_FILE):
+        files['bgm'] = open(BGM_FILE, 'rb')
+
+    # 准备参数
+    data = {
+        'text_content': TEXT_CONTENT,
+        'language': 'en',
+        'bgm_volume': '5',
+        'voice_volume': '1.0',
+        'max_words_per_line': '10',
+        'long_token_dur_s': '0.8',
+        'title': '测试标题',
+        'title_start': '0',
+        'title_end': '100',
+        'loop_video': '1',  # 1=循环视频，0=不循环
+    }
+
+    try:
+        response = requests.post(url, files=files, data=data)
+        result = response.json()
+
+        # 关闭文件
+        for f in files.values():
+            f.close()
+
+        if result['code'] == 0:
+            print(f"✅ 任务提交成功！")
+            print(f"   Task ID: {result['task_id']}")
+            print(f"   提示: {result['msg']}")
+            return result['task_id']
+        else:
+            print(f"❌ 任务提交失败: {result['msg']}")
+            return None
+
+    except Exception as e:
+        print(f"❌ 请求失败: {str(e)}")
+        return None
+
+
+def query_task_status(task_id):
+    """查询任务状态"""
+    url = f"{API_BASE_URL}/task_status/{task_id}"
+
+    try:
+        response = requests.get(url)
+        result = response.json()
+
+        if result['code'] == 0:
+            return result
+        else:
+            print(f"❌ 查询失败: {result['msg']}")
+            return None
+
+    except Exception as e:
+        print(f"❌ 查询失败: {str(e)}")
+        return None
+
+
+def wait_for_completion(task_id, check_interval=5, max_wait=3600):
+    """等待任务完成"""
+    print(f"\n⏳ 等待任务完成 (每 {check_interval} 秒查询一次)...")
+
+    start_time = time.time()
+
+    while True:
+        # 检查是否超时
+        elapsed = time.time() - start_time
+        if elapsed > max_wait:
+            print(f"❌ 等待超时 ({max_wait}秒)")
+            return None
+
+        # 查询状态
+        status_info = query_task_status(task_id)
+
+        if status_info is None:
+            print("❌ 无法获取任务状态")
+            return None
+
+        status = status_info['status']
+        task_type = status_info['type']
+
+        print(f"   [{int(elapsed)}s] 状态: {status}")
+
+        if status == 'completed':
+            print(f"\n✅ 任务完成！")
+            result = status_info['result']
+            if result:
+                print(f"   文件名: {result.get('filename')}")
+                print(f"   下载链接: {result.get('url')}")
+            return result
+
+        elif status == 'failed':
+            print(f"\n❌ 任务失败！")
+            print(f"   错误信息: {status_info.get('error')}")
+            return None
+
+        elif status in ['pending', 'processing']:
+            # 继续等待
+            time.sleep(check_interval)
+
+        else:
+            print(f"❌ 未知状态: {status}")
+            return None
+
+
+def main():
+    """主函数"""
+    print("=" * 60)
+    print("视频处理异步接口测试")
+    print("=" * 60)
+
+    # 检查文件是否存在
+    if not os.path.exists(VIDEO_FILE):
+        print(f"❌ 视频文件不存在: {VIDEO_FILE}")
+        return
+
+    if not os.path.exists(AUDIO_FILE):
+        print(f"❌ 音频文件不存在: {AUDIO_FILE}")
+        return
+
+    # 1. 提交任务
+    task_id = submit_video_task()
+    if task_id is None:
+        return
+
+    # 2. 等待完成
+    result = wait_for_completion(task_id, check_interval=5, max_wait=3600)
+
+    if result:
+        print("\n" + "=" * 60)
+        print("✅ 测试成功！")
+        print("=" * 60)
+    else:
+        print("\n" + "=" * 60)
+        print("❌ 测试失败")
+        print("=" * 60)
+
+
+if __name__ == '__main__':
+    main()

@@ -28,7 +28,7 @@ def generate_subtitles_direct(
     language: str = "en",
     max_words_per_line: int = 30,
     long_token_dur_s: float = 2.0,
-    device: str = "mps",
+    device: str = "cpu",
     title: Optional[str] = None,
     title_start: float = 0.0,
     title_end: float = 10.0,
@@ -133,23 +133,43 @@ def merge_audio_with_bgm(
 
 
 def add_subtitles_and_audio_to_video(
-    video_path: str, audio_path: str, ass_file: str, output_path: str, loop_video: bool = True
+    video_path: str,
+    audio_path: str,
+    ass_file: str,
+    output_path: str,
+    loop_video: bool = True,
 ) -> str:
     """将字幕和音频添加到视频中，可选择循环视频以匹配音频时长"""
 
     if loop_video:
         # 获取音频和视频时长
         audio_duration_cmd = [
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", audio_path
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            audio_path,
         ]
         video_duration_cmd = [
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", video_path
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
         ]
 
-        audio_duration = float(subprocess.check_output(audio_duration_cmd, text=True).strip())
-        video_duration = float(subprocess.check_output(video_duration_cmd, text=True).strip())
+        audio_duration = float(
+            subprocess.check_output(audio_duration_cmd, text=True).strip()
+        )
+        video_duration = float(
+            subprocess.check_output(video_duration_cmd, text=True).strip()
+        )
 
         print(f"音频时长: {audio_duration:.2f}s, 视频时长: {video_duration:.2f}s")
 
@@ -161,15 +181,24 @@ def add_subtitles_and_audio_to_video(
             cmd = [
                 "ffmpeg",
                 "-y",
-                "-stream_loop", str(loop_count),
-                "-i", video_path,
-                "-i", audio_path,
-                "-vf", f"ass={ass_file}",
-                "-c:v", "libx264",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
+                "-stream_loop",
+                str(loop_count),
+                "-i",
+                video_path,
+                "-i",
+                audio_path,
+                "-vf",
+                f"ass={ass_file}",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
                 "-shortest",
                 output_path,
             ]
@@ -178,14 +207,22 @@ def add_subtitles_and_audio_to_video(
             cmd = [
                 "ffmpeg",
                 "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-vf", f"ass={ass_file}",
-                "-c:v", "libx264",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
+                "-i",
+                video_path,
+                "-i",
+                audio_path,
+                "-vf",
+                f"ass={ass_file}",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
                 "-shortest",
                 output_path,
             ]
@@ -194,14 +231,22 @@ def add_subtitles_and_audio_to_video(
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-vf", f"ass={ass_file}",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-map", "0:v:0",
-            "-map", "1:a:0",
+            "-i",
+            video_path,
+            "-i",
+            audio_path,
+            "-vf",
+            f"ass={ass_file}",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
             "-shortest",
             output_path,
         ]
@@ -242,7 +287,7 @@ def process_video_with_subtitles(
             language=language,
             max_words_per_line=max_words_per_line,
             long_token_dur_s=long_token_dur_s,
-            device="mps",
+            device="cpu",
             title=title,
             title_start=title_start,
             title_end=title_end,
