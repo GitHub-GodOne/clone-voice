@@ -27,6 +27,38 @@ web_address = os.getenv('WEB_ADDRESS', '127.0.0.1:9988')
 respon_host = os.getenv('RESPON_HOST', f'http://{web_address}')
 enable_sts = int(os.getenv('ENABLE_STS', '0'))
 
+# 任务状态管理
+task_status = {}  # {task_id: {'status': 'pending/processing/completed/failed', 'result': {}, 'error': ''}}
+task_lock = threading.Lock()
+
+def create_task(task_type):
+    """创建新任务并返回任务ID"""
+    import uuid
+    task_id = str(uuid.uuid4())
+    with task_lock:
+        task_status[task_id] = {
+            'status': 'pending',
+            'type': task_type,
+            'created_at': time.time(),
+            'result': None,
+            'error': None
+        }
+    return task_id
+
+def update_task_status(task_id, status, result=None, error=None):
+    """更新任务状态"""
+    with task_lock:
+        if task_id in task_status:
+            task_status[task_id]['status'] = status
+            if result is not None:
+                task_status[task_id]['result'] = result
+            if error is not None:
+                task_status[task_id]['error'] = error
+
+def get_task_status(task_id):
+    """获取任务状态"""
+    with task_lock:
+        return task_status.get(task_id)
 
 
 updatecache()
@@ -93,7 +125,7 @@ def upload():
             name = f'{noextname}{ext}'
             if os.path.exists(os.path.join(save_dir, f'{noextname}{ext}')):
                 name = f'{datetime.datetime.now().strftime("%m%d-%H%M%S")}-{noextname}{ext}'
-            # mp3 or wav           
+            # mp3 or wav
             tmp_wav = os.path.join(TMP_DIR, "tmp_" + name)
             audio_file.save(tmp_wav)
             # save to wav
@@ -208,14 +240,14 @@ def apitts():
                     app.logger.info(f"[apitts][tts]{time_tmp=},{filename=}")
                 if time_tmp>3600:
                     return jsonify({"code": 5, "msg": f'error:{text}'})
-                    
+
 
             # 当前行已完成合成
             target_wav = os.path.normpath(os.path.join(TTS_DIR, filename))
             if not os.path.exists(target_wav):
                 msg = {"code": 6, "msg": cfg.global_tts_result[filename] if filename in cfg.global_tts_result else "error"}
             else:
-                
+
                 msg = {"code": 0, "filename": target_wav, 'name': filename}
             app.logger.info(f"[apitts][tts] {filename=},{msg=}")
             try:
@@ -303,7 +335,7 @@ def tts():
                 break
         if msg is not None:
             continue
-                
+
 
         # 当前行已完成合成
         if not os.path.exists(target_wav):
@@ -424,7 +456,234 @@ def stsstatus():
     return jsonify({'code': 0, "msg": "start" if cfg.sts_status else "stop"})
 
 
-# 视频处理接口
+# ==================== 任务状态查询接口 ====================
+@app.route('/task_status/<task_id>', methods=['GET'])
+def query_task_status(task_id):
+    """查询任务状态
+    返回:
+        - status: pending(等待中) / processing(处理中) / completed(已完成) / failed(失败)
+        - result: 任务完成时的结果
+        - error: 任务失败时的错误信息
+    """
+    task = get_task_status(task_id)
+    if task is None:
+        return jsonify({'code': 1, 'msg': f'task_id {task_id} not found'})
+    return jsonify({
+        'code': 0,
+        'task_id': task_id,
+        'status': task['status'],
+        'type': task['type'],
+        'result': task['result'],
+        'error': task['error']
+    })
+
+
+# ==================== TTS 异步接口 ====================
+@app.route('/tts_async', methods=['POST'])
+def tts_async():
+    """异步TTS接口，立即返回task_id，后台处理任务"""
+    text = request.form.get("text", "").strip()
+    voice = request.form.get("voice", '')
+    speed = 1.0
+    try:
+        speed = float(request.form.get("speed", 1))
+    except:
+        pass
+    language = request.form.get("language", '')
+    model = request.form.get("model", "")
+
+    if re.match(r'^[~`!@#$%^&*()_+=,./;\':\[\]{}<>?\\|"，。？；‘：“”’｛【】｝！·￥、\s\n\r -]*$', text):
+        return jsonify({"code": 1, "msg": "no text"})
+    if not text or not voice or not language:
+        return jsonify({"code": 1, "msg": "text/voice/language params lost"})
+
+    task_id = create_task('tts')
+    update_task_status(task_id, 'processing')
+
+    def run_tts_task(task_id, text, voice, speed, language, model):
+        try:
+            text_list = get_subtitle_from_srt(text)
+            is_srt = True
+            if text_list is None:
+                is_srt = False
+                text_list = []
+                for it in text.split("\n"):
+                    text_list.append({"text": it.strip()})
+
+            num = 0
+            while num < len(text_list):
+                t = text_list[num]
+                t['text'] = t['text'].replace("\n", ' . ')
+                md5_hash = hashlib.md5()
+                md5_hash.update(f"{t['text']}-{voice}-{language}-{speed}-{model}".encode('utf-8'))
+                filename = md5_hash.hexdigest() + ".wav"
+
+                rs = create_tts(text=t['text'], model=model, speed=speed,
+                                voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=filename)
+                if rs is not None:
+                    text_list[num]['result'] = rs
+                    num += 1
+                    continue
+
+                time_tmp = 0
+                target_wav = os.path.normpath(os.path.join(TTS_DIR, filename))
+                msg = None
+                while filename not in cfg.global_tts_result and not os.path.exists(target_wav):
+                    time.sleep(3)
+                    time_tmp += 3
+                    if time_tmp > 3600:
+                        msg = {"code": 1, "msg": f'{filename} error'}
+                        text_list[num]['result'] = msg
+                        num += 1
+                        break
+                if msg is not None:
+                    continue
+
+                if not os.path.exists(target_wav):
+                    msg = {"code": 1, "msg": "not exists"}
+                else:
+                    if speed != 1.0 and speed > 0 and speed <= 2.0:
+                        speed_tmp = os.path.join(TMP_DIR, f'speed_{time.time()}.wav')
+                        p = subprocess.run(
+                            ['ffmpeg', '-hide_banner', '-ignore_unknown', '-y', '-i', target_wav, '-af',
+                             f"atempo={speed}", os.path.normpath(speed_tmp)], encoding="utf-8", capture_output=True)
+                        if p.returncode != 0:
+                            update_task_status(task_id, 'failed', error=str(p.stderr))
+                            return
+                        shutil.copy2(speed_tmp, target_wav)
+                    msg = {"code": 0, "filename": target_wav, 'name': filename}
+                try:
+                    cfg.global_tts_result.pop(filename)
+                except:
+                    pass
+                text_list[num]['result'] = msg
+                num += 1
+
+            filename, errors = merge_audio_segments(text_list, is_srt=is_srt)
+            if filename and os.path.exists(filename) and os.path.getsize(filename) > 0:
+                basename = os.path.basename(filename)
+                result = {
+                    "code": 0,
+                    "filename": filename,
+                    "name": basename,
+                    "msg": errors,
+                    "url": f'{respon_host}/static/ttslist/{basename}'
+                }
+                update_task_status(task_id, 'completed', result=result)
+            else:
+                update_task_status(task_id, 'failed', error=f"error:{filename=},{errors=}")
+        except Exception as e:
+            app.logger.error(f"[tts_async] task {task_id} error: {str(e)}")
+            update_task_status(task_id, 'failed', error=str(e))
+
+    threading.Thread(target=run_tts_task, args=(task_id, text, voice, speed, language, model), daemon=True).start()
+
+    return jsonify({
+        'code': 0,
+        'task_id': task_id,
+        'msg': 'task submitted, use /task_status/<task_id> to query progress'
+    })
+
+
+# ==================== 视频处理异步接口 ====================
+@app.route('/process_video_async', methods=['POST'])
+def process_video_async():
+    """异步视频处理接口，立即返回task_id，后台处理任务"""
+    try:
+        video_file = request.files.get('video')
+        audio_file = request.files.get('audio')
+        bgm_file = request.files.get('bgm')
+        text_content = request.form.get('text_content', '').strip()
+
+        try:
+            bgm_volume = float(request.form.get('bgm_volume', 0.3))
+            voice_volume = float(request.form.get('voice_volume', 1.0))
+            language = request.form.get('language', 'en')
+            title = request.form.get('title', '')
+            title_start = float(request.form.get('title_start', 0.0))
+            title_end = float(request.form.get('title_end', 10.0))
+            max_words_per_line = int(request.form.get('max_words_per_line', 30))
+            long_token_dur_s = float(request.form.get('long_token_dur_s', 2.0))
+            loop_video = request.form.get('loop_video', '1') == '1'
+        except Exception as e:
+            return jsonify({'code': 1, 'msg': f'Parameter error: {str(e)}'})
+
+        if not video_file or not audio_file or not text_content:
+            return jsonify({'code': 1, 'msg': 'video/audio/text content required'})
+
+        # 保存上传的文件到临时目录（需要在主线程中完成，因为request上下文在子线程不可用）
+        import tempfile
+        from pathlib import Path
+        temp_dir = Path(tempfile.mkdtemp())
+
+        video_path = temp_dir / video_file.filename
+        audio_path = temp_dir / audio_file.filename
+        video_file.save(str(video_path))
+        audio_file.save(str(audio_path))
+
+        bgm_path = None
+        if bgm_file:
+            bgm_path = temp_dir / bgm_file.filename
+            bgm_file.save(str(bgm_path))
+
+        output_filename = f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        output_path = os.path.join(TTS_DIR, output_filename)
+
+        task_id = create_task('process_video')
+        update_task_status(task_id, 'processing')
+
+        def run_video_task(task_id, video_path, audio_path, text_content, output_path, output_filename,
+                           language, bgm_path, bgm_volume, voice_volume, max_words_per_line,
+                           long_token_dur_s, title, title_start, title_end, loop_video, temp_dir):
+            try:
+                video_processor.process_video_with_subtitles(
+                    video_path=str(video_path),
+                    audio_path=str(audio_path),
+                    text_content=text_content,
+                    output_path=output_path,
+                    language=language,
+                    bgm_path=str(bgm_path) if bgm_path else None,
+                    bgm_volume=bgm_volume,
+                    voice_volume=voice_volume,
+                    max_words_per_line=max_words_per_line,
+                    long_token_dur_s=long_token_dur_s,
+                    title=title if title else None,
+                    title_start=title_start,
+                    title_end=title_end,
+                    loop_video=loop_video
+                )
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                result = {
+                    'code': 0,
+                    'msg': 'success',
+                    'filename': output_filename,
+                    'url': f'{respon_host}/static/ttslist/{output_filename}',
+                    'is_video': True
+                }
+                update_task_status(task_id, 'completed', result=result)
+            except Exception as e:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                app.logger.error(f"[process_video_async] task {task_id} error: {str(e)}")
+                update_task_status(task_id, 'failed', error=f'Processing failed: {str(e)}')
+
+        threading.Thread(target=run_video_task, args=(
+            task_id, video_path, audio_path, text_content, output_path, output_filename,
+            language, bgm_path, bgm_volume, voice_volume, max_words_per_line,
+            long_token_dur_s, title, title_start, title_end, loop_video, temp_dir
+        ), daemon=True).start()
+
+        return jsonify({
+            'code': 0,
+            'task_id': task_id,
+            'msg': 'task submitted, use /task_status/<task_id> to query progress'
+        })
+
+    except Exception as e:
+        app.logger.error(f"[process_video_async] error: {str(e)}")
+        return jsonify({'code': 3, 'msg': str(e)})
+
+
+# 视频处理接口（同步）
 @app.route('/process_video', methods=['POST'])
 def process_video():
     try:
@@ -539,7 +798,7 @@ if __name__ == '__main__':
         threading.Thread(target=logic.checkupdate).start()
 
         # 如果存在默认模型则启动
-        
+
         if TEXT_MODEL_EXITS:
             print("\n"+langlist['lang2'])
             tts_thread = threading.Thread(target=ttsloop)
@@ -549,7 +808,7 @@ if __name__ == '__main__':
                 f"\n{langlist['lang3']}: {cfg.download_address}\n")
             input(f"\n{langlist['lang3']}: {cfg.download_address}\n")
             sys.exit()
-        
+
         if enable_sts==1 and VOICE_MODEL_EXITS:
             print(langlist['lang4'])
             sts_thread = threading.Thread(target=stsloop)
@@ -557,7 +816,7 @@ if __name__ == '__main__':
         #else:
         #    app.logger.error(
         #        f"\n{langlist['lang5']}: {cfg.download_address}\n")
-        
+
         print(langlist['lang7'])
         try:
             host = web_address.split(':')
