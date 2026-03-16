@@ -611,6 +611,12 @@ def process_video_async():
             max_words_per_line = int(request.form.get('max_words_per_line', 30))
             long_token_dur_s = float(request.form.get('long_token_dur_s', 2.0))
             loop_video = request.form.get('loop_video', '1') == '1'
+            subtitle_fontsize = int(request.form.get('subtitle_fontsize', 80))
+            subtitle_marginv = int(request.form.get('subtitle_marginv', 60))
+            subtitle_y = int(request.form.get('subtitle_y', 1800))
+            title_fontsize = int(request.form.get('title_fontsize', 64))
+            title_x = int(request.form.get('title_x', 540))
+            title_y = int(request.form.get('title_y', 300))
         except Exception as e:
             return jsonify({'code': 1, 'msg': f'Parameter error: {str(e)}'})
 
@@ -655,17 +661,27 @@ def process_video_async():
         update_task_status(task_id, 'processing')
 
         def download_file(url, save_path):
-            """从URL下载文件"""
+            """从URL下载文件，失败时重试3次"""
             import requests
-            response = requests.get(url, stream=True, timeout=300)
-            response.raise_for_status()
-            with open(save_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            for attempt in range(3):
+                try:
+                    response = requests.get(url, stream=True, timeout=300, verify=False)
+                    response.raise_for_status()
+                    with open(save_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    return
+                except Exception as e:
+                    if attempt < 2:
+                        app.logger.warning(f"[download_file] Attempt {attempt+1} failed: {str(e)}, retrying...")
+                        time.sleep(2)
+                    else:
+                        raise
 
         def run_video_task(task_id, video_path, audio_path, video_url, audio_url, bgm_path, bgm_url,
                            text_content, output_path, output_filename, language, bgm_volume, voice_volume,
-                           max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video, temp_dir):
+                           max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video,
+                           subtitle_fontsize, subtitle_marginv, subtitle_y, title_fontsize, title_x, title_y, temp_dir):
             try:
                 # 如果是URL，先下载文件
                 if video_url:
@@ -695,7 +711,13 @@ def process_video_async():
                     title=title if title else None,
                     title_start=title_start,
                     title_end=title_end,
-                    loop_video=loop_video
+                    loop_video=loop_video,
+                    subtitle_fontsize=subtitle_fontsize,
+                    subtitle_marginv=subtitle_marginv,
+                    subtitle_y=subtitle_y,
+                    title_fontsize=title_fontsize,
+                    title_x=title_x,
+                    title_y=title_y
                 )
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 result = {
@@ -716,7 +738,8 @@ def process_video_async():
         threading.Thread(target=run_video_task, args=(
             task_id, video_path, audio_path, video_url, audio_url, bgm_path, bgm_url,
             text_content, output_path, output_filename, language, bgm_volume, voice_volume,
-            max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video, temp_dir
+            max_words_per_line, long_token_dur_s, title, title_start, title_end, loop_video,
+            subtitle_fontsize, subtitle_marginv, subtitle_y, title_fontsize, title_x, title_y, temp_dir
         ), daemon=True).start()
 
         return jsonify({
@@ -755,6 +778,12 @@ def process_video():
             max_words_per_line = int(request.form.get('max_words_per_line', 30))
             long_token_dur_s = float(request.form.get('long_token_dur_s', 2.0))
             loop_video = request.form.get('loop_video', '1') == '1'
+            subtitle_fontsize = int(request.form.get('subtitle_fontsize', 80))
+            subtitle_marginv = int(request.form.get('subtitle_marginv', 60))
+            subtitle_y = int(request.form.get('subtitle_y', 1800))
+            title_fontsize = int(request.form.get('title_fontsize', 64))
+            title_x = int(request.form.get('title_x', 540))
+            title_y = int(request.form.get('title_y', 300))
             app.logger.info(f"[process_video] Parameters parsed successfully")
         except Exception as e:
             app.logger.error(f"[process_video] Error parsing parameters: {str(e)}")
@@ -806,7 +835,13 @@ def process_video():
                 title=title if title else None,
                 title_start=title_start,
                 title_end=title_end,
-                loop_video=loop_video
+                loop_video=loop_video,
+                subtitle_fontsize=subtitle_fontsize,
+                subtitle_marginv=subtitle_marginv,
+                subtitle_y=subtitle_y,
+                title_fontsize=title_fontsize,
+                title_x=title_x,
+                title_y=title_y
             )
             app.logger.info(f"[process_video] Video processing completed successfully")
 

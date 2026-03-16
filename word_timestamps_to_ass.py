@@ -324,19 +324,23 @@ def cs_to_ass_time(cs: int) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-ASS_HEADER_TEMPLATE = """[Script Info]
+def make_ass_header(subtitle_fontsize: int = 80, subtitle_marginv: int = 60, title_fontsize: int = 64, video_width: int = 1080, video_height: int = 1920, title_margin: int = 100) -> str:
+    return f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {video_width}
+PlayResY: {video_height}
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Default,Arial,80,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,8,0,5,30,30,60,1
-Style: Title,Arial,64,&H0000D7FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,6,0,5,30,30,60,1
+Style: Default,Arial,{subtitle_fontsize},&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,8,0,2,30,30,{subtitle_marginv},1
+Style: Title,Arial,{title_fontsize},&H0000D7FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,6,0,9,{title_margin},{title_margin},60,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+# 移除这行，不再使用静态模板
+# ASS_HEADER_TEMPLATE = make_ass_header()
 
 END_PUNC_RENDER = set([",", ".", "!", "?", ";", ":", "，", "。", "！", "？", "；", "："])
 NO_SPACE_AFTER = set(["(", "[", "{", "“", "‘", '"', "「", "『", "（", "《"])
@@ -459,6 +463,15 @@ def make_typewriter_ass(
     title_end: float = 10.0,
     title_x: int = 540,
     title_y: int = 300,
+    # subtitle style
+    subtitle_fontsize: int = 80,
+    subtitle_marginv: int = 60,
+    subtitle_x: int = 540,
+    subtitle_y: int = 1800,
+    title_fontsize: int = 64,
+    video_width: int = 1080,
+    video_height: int = 1920,
+    title_margin: int = 100,
 ) -> None:
     ws = [
         w
@@ -466,7 +479,7 @@ def make_typewriter_ass(
         if w.get("start") is not None and w.get("end") is not None
     ]
     if not ws:
-        Path(out_ass_path).write_text(ASS_HEADER_TEMPLATE, encoding="utf-8")
+        Path(out_ass_path).write_text(make_ass_header(subtitle_fontsize, subtitle_marginv, title_fontsize, video_width, video_height), encoding="utf-8")
         return
 
     # 分行
@@ -474,7 +487,7 @@ def make_typewriter_ass(
         ws, max_words_per_line=max_words_per_line, long_token_dur_s=long_token_dur_s
     )
 
-    out_lines: List[str] = [ASS_HEADER_TEMPLATE.strip(), ""]
+    out_lines: List[str] = [make_ass_header(subtitle_fontsize, subtitle_marginv, title_fontsize, video_width, video_height).strip(), ""]
 
     # Title (layer=1)
     if title:
@@ -484,7 +497,7 @@ def make_typewriter_ass(
             ed = st + 1
         out_lines.append("; --- Persistent Title ---")
         out_lines.append(
-            f"Dialogue: 1,{cs_to_ass_time(st)},{cs_to_ass_time(ed)},Title,,0,0,0,,{{\\pos({title_x},{title_y})}}{title}"
+            f"Dialogue: 1,{cs_to_ass_time(st)},{cs_to_ass_time(ed)},Title,,0,0,0,,{{\\an9\\pos({title_x},{title_y})\\q2}}{title}"
         )
         out_lines.append("")
 
@@ -622,7 +635,7 @@ def make_typewriter_ass(
                     )
 
             out_lines.append(
-                f"Dialogue: 0,{cs_to_ass_time(start_cs)},{cs_to_ass_time(end_cs)},Default,,0,0,0,,{text_cum}"
+                f"Dialogue: 0,{cs_to_ass_time(start_cs)},{cs_to_ass_time(end_cs)},Default,,0,0,0,,{{\\pos({subtitle_x},{subtitle_y})}}{text_cum}"
             )
 
         # 记录当前行的最后一个词，用于下一行的标点检查

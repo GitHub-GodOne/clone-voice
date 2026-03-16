@@ -18,17 +18,15 @@ AUDIO_FILE = "/Users/pikju/program/python/clone-voice/video/voice.wav"
 BGM_FILE = "/Users/pikju/program/python/clone-voice/video/mucis.mp3"  # 可选
 
 # 测试 URL（如果使用 URL 方式）
-VIDEO_URL = ""  # 例如: "https://example.com/video.mp4"
-AUDIO_URL = ""  # 例如: "https://example.com/audio.wav"
-BGM_URL = ""    # 例如: "https://example.com/bgm.mp3"
+VIDEO_URL = "https://dashscope-result-wlcb-acdr-1.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/a3/20260305/a0f45588/0b47c546-c46a-40c0-92fa-a733da82fea9.mp4?Expires=1772798225&OSSAccessKeyId=LTAI5tKPD3TMqf2Lna1fASuh&Signature=s7Dc%2FB8OnAjB%2F9Fl75LTbiL9TRM%3D"  # 例如: "https://example.com/video.mp4"
+AUDIO_URL = "https://clonevoice.nailai.net/static/ttslist/7aab11e154839592ff2bc78234b70341.wav"  # 例如: "https://example.com/audio.wav"
+BGM_URL = ""  # 例如: "https://example.com/bgm.mp3"
 
 # 测试文本
-TEXT_CONTENT = (
-    """So do not fear,for I am with you;do not be dismayed for I am your God."""
-)
+TEXT_CONTENT = """When anxiety grips you, it can feel overwhelming... Breathe deeply and hear these words from Isaiah 41:10: "Fear not, for I am with you; be not dismayed, for I am your God. I will strengthen you, I will help you, I will uphold you with my righteous right hand." ... Allow this promise to bring peace to your restless heart, knowing that you're never alone..."""
 
 # 选择提交方式: 'file' 或 'url'
-SUBMIT_MODE = 'file'  # 改为 'url' 使用 URL 方式
+SUBMIT_MODE = 'url'  # 改为 'url' 使用 URL 方式
 
 
 def submit_video_task_by_file():
@@ -59,6 +57,12 @@ def submit_video_task_by_file():
         'title_start': '0',
         'title_end': '100',
         'loop_video': '1',  # 1=循环视频，0=不循环
+        'subtitle_fontsize': '100',  # 字幕字体大小
+        'subtitle_marginv': '100',   # 字幕底部边距
+        'subtitle_y': '1700',        # 字幕Y坐标位置
+        'title_fontsize': '80',      # 标题字体大小
+        'title_x': '540',            # 标题X坐标
+        'title_y': '300',            # 标题Y坐标
     }
 
     try:
@@ -103,6 +107,12 @@ def submit_video_task_by_url():
         'title_start': '0',
         'title_end': '100',
         'loop_video': '1',  # 1=循环视频，0=不循环
+        'subtitle_fontsize': '100',  # 字幕字体大小
+        'subtitle_marginv': '100',   # 字幕底部边距
+        'subtitle_y': '1700',        # 字幕Y坐标位置
+        'title_fontsize': '80',      # 标题字体大小
+        'title_x': '540',            # 标题X坐标
+        'title_y': '300',            # 标题Y坐标
     }
 
     # 可选：添加背景音乐 URL

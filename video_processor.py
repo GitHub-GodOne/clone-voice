@@ -32,6 +32,16 @@ def generate_subtitles_direct(
     title: Optional[str] = None,
     title_start: float = 0.0,
     title_end: float = 10.0,
+    subtitle_fontsize: int = 80,
+    subtitle_marginv: int = 60,
+    subtitle_x: int = 540,
+    subtitle_y: int = 1800,
+    title_fontsize: int = 64,
+    title_x: int = 540,
+    title_y: int = 300,
+    video_width: int = 1080,
+    video_height: int = 1920,
+    title_margin: int = 100,
 ) -> str:
     """
     直接生成 ASS 字幕文件（使用 whisperx）
@@ -88,8 +98,16 @@ def generate_subtitles_direct(
         title=title,
         title_start=title_start,
         title_end=title_end,
-        title_x=540,
-        title_y=300,
+        title_x=title_x,
+        title_y=title_y,
+        subtitle_fontsize=subtitle_fontsize,
+        subtitle_marginv=subtitle_marginv,
+        subtitle_x=subtitle_x,
+        subtitle_y=subtitle_y,
+        title_fontsize=title_fontsize,
+        video_width=video_width,
+        video_height=video_height,
+        title_margin=title_margin,
     )
 
     return out_ass
@@ -273,8 +291,53 @@ def process_video_with_subtitles(
     title_start: float = 0.0,
     title_end: float = 10.0,
     loop_video: bool = True,
+    subtitle_fontsize: int = 80,
+    subtitle_marginv: int = 60,
+    subtitle_y: int = 1800,
+    title_fontsize: int = 64,
+    title_x: int = 540,
+    title_y: int = 300,
 ) -> str:
     """完整的视频处理流程：生成字幕、合并音频、添加到视频"""
+
+    # 获取视频分辨率
+    probe_cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=p=0",
+        video_path,
+    ]
+    result = subprocess.run(probe_cmd, capture_output=True, text=True)
+    subtitle_x = 540  # 默认居中位置
+    video_width = 1080
+    video_height = 1920
+    title_margin = 100  # 标题边距
+    if result.returncode == 0:
+        video_width, video_height = map(int, result.stdout.strip().split(','))
+        subtitle_x = video_width // 2  # 字幕X坐标自动居中
+
+        # 处理负数坐标：负数表示从右边/底部计算
+        if subtitle_y < 0:
+            subtitle_y = video_height + subtitle_y
+        if title_x < 0:
+            title_x = video_width + title_x
+        if title_y < 0:
+            title_y = video_height + title_y
+
+        # 限制坐标在安全范围内
+        subtitle_y = max(subtitle_fontsize, min(subtitle_y, video_height - 20))
+        title_x = max(title_margin, min(title_x, video_width - title_margin))
+        title_y = max(title_fontsize, min(title_y, video_height - title_fontsize))
+        print(
+            f"视频分辨率: {video_width}x{video_height}, 调整后坐标: subtitle=({subtitle_x},{subtitle_y}), title=({title_x},{title_y}), title_margin={title_margin}"
+        )
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
@@ -291,6 +354,16 @@ def process_video_with_subtitles(
             title=title,
             title_start=title_start,
             title_end=title_end,
+            subtitle_fontsize=subtitle_fontsize,
+            subtitle_marginv=subtitle_marginv,
+            subtitle_x=subtitle_x,
+            subtitle_y=subtitle_y,
+            title_fontsize=title_fontsize,
+            title_x=title_x,
+            title_y=title_y,
+            video_width=video_width,
+            video_height=video_height,
+            title_margin=title_margin,
         )
 
         # 步骤 2: 合并音频
