@@ -30,7 +30,7 @@ setup.cfg
 *.pt
 cn1.wav
 sx1.wav
-
+.env
 *.spec
 tts/tts_models--multilingual--multi-dataset--xtts_v2
 tts/voice_conversion_models--multilingual--vctk--freevc24
