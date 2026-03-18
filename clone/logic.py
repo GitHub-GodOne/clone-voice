@@ -165,21 +165,28 @@ def stsloop():
 
 # 实际启动tts合成的函数
 def create_tts(*, text, voice, language, filename, speed=1.0,model=""):
-    absofilename = os.path.join(cfg.TTS_DIR, filename)
-    if os.path.exists(absofilename) and os.path.getsize(absofilename) > 0:
-        print(f"[tts][create_ts]{filename} {speed} has exists")
-        cfg.global_tts_result[filename] = 1
-        return {"code": 0, "filename": absofilename, 'name': filename}
+    # 按日期创建子目录
+    date_dir = time.strftime("%Y%m%d")
+    date_path = os.path.join(cfg.TTS_DIR, date_dir)
+    os.makedirs(date_path, exist_ok=True)
+
+    # 添加时间戳避免重复
+    timestamp = str(int(time.time() * 1000))
+    name, ext = os.path.splitext(filename)
+    filename = f"{name}_{timestamp}{ext}"
+
+    absofilename = os.path.join(date_path, filename)
+    relative_path = os.path.join(date_dir, filename)
+
     try:
         print(f"[tts][create_ts] **{text}** {voice=},{model=}")
         if not model or model =="default":
-            cfg.q.put({"voice": voice, "text": text,"speed":speed, "language": language, "filename": filename})
+            cfg.q.put({"voice": voice, "text": text,"speed":speed, "language": language, "filename": relative_path})
         else:
-            #如果不存在该模型，就先启动
             print(f'{model=}')
             if model not in cfg.MYMODEL_QUEUE or not cfg.MYMODEL_QUEUE[model]:
                 run_tts(model)
-            cfg.MYMODEL_QUEUE[model].put({"text": text,"speed":speed, "language": language, "filename": filename})
+            cfg.MYMODEL_QUEUE[model].put({"text": text,"speed":speed, "language": language, "filename": relative_path})
     except Exception as e:
         print(e)
         print(f"error，{str(e)}")
