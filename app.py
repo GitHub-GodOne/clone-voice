@@ -274,7 +274,7 @@ def apitts():
         md5_hash.update(f"{text}-{language}-{audio_name}-{model}".encode('utf-8'))
 
         app.logger.info(f"[apitts]{voicename=}")
-        if re.match(r'^[~`!@#$%^&*()_+=,./;\':\[\]{}<>?\\|"，。？；‘：“”’｛【】｝！·￥、\s\n\r -]*$', text):
+        if re.match(r'^[~`!@#$%^&*()_+=,./;\':[\]{}<>?\\|"，。？；：""\'｛【】｝！·￥、\s\n\r -]*$', text):
             return jsonify({"code": 3, "msg": "lost text for translate"})
         if not text or not language:
             return jsonify({"code": 4, "msg": "text & language params lost"})
@@ -331,44 +331,44 @@ def apitts():
 # text:待合成文字
 # voice：声音文件
 # language:语言代码
-@app.route(‘/tts’, methods=[‘GET’, ‘POST’])
+@app.route('/tts', methods=['GET', 'POST'])
 def tts():
-    text = request.form.get(“text”,””).strip()
-    voice = request.form.get(“voice”,’’)
+    text = request.form.get("text","").strip()
+    voice = request.form.get("voice",'')
     speed = 1.0
     try:
-        speed = float(request.form.get(“speed”,1))
+        speed = float(request.form.get("speed",1))
     except:
         pass
-    language = request.form.get(“language”,’’)
-    model = request.form.get(“model”,””)
+    language = request.form.get("language",'')
+    model = request.form.get("model","")
 
-    if re.match(r’^[~`!@#$%^&*()_+=,./;\’:\[\]{}<>?\\|”，。？；’：””’｛【】｝！·￥、\s\n\r -]*$’, text):
-        return jsonify({“code”: 1, “msg”: “no text”})
+    if re.match(r'^[~`!@#$%^&*()_+=,./;\':[\]{}<>?\\|"，。？；：""\'｛【】｝！·￥、\s\n\r -]*$', text):
+        return jsonify({"code": 1, "msg": "no text"})
     if not text or not voice or not language:
-        return jsonify({“code”: 1, “msg”: “text/voice/language params lost”})
+        return jsonify({"code": 1, "msg": "text/voice/language params lost"})
 
     text_list = get_subtitle_from_srt(text)
     is_srt = True
     if text_list is None:
         is_srt = False
-        text_list = [{“text”: it.strip()} for it in text.split(“\n”)]
+        text_list = [{"text": it.strip()} for it in text.split("\n")]
 
     text_list = process_tts_text_list(text_list, voice, language, speed, model)
     filename, errors = merge_audio_segments(text_list, is_srt=is_srt)
 
     if filename and os.path.exists(filename) and os.path.getsize(filename) > 0:
         # 提取相对路径用于URL
-        rel_path = filename.replace(TTS_DIR + os.sep, ‘’).replace(‘\\’, ‘/’)
+        rel_path = filename.replace(TTS_DIR + os.sep, '').replace('\\', '/')
         res = {
-            “code”: 0,
-            “filename”: filename,
-            “name”: os.path.basename(filename),
-            “msg”: errors,
-            “url”: f’{respon_host}/static/ttslist/{rel_path}’
+            "code": 0,
+            "filename": filename,
+            "name": os.path.basename(filename),
+            "msg": errors,
+            "url": f'{respon_host}/static/ttslist/{rel_path}'
         }
     else:
-        res = {“code”: 1, “msg”: f”error:{filename=},{errors=}”}
+        res = {"code": 1, "msg": f"error:{filename=},{errors=}"}
     return jsonify(res)
 
 
@@ -487,7 +487,7 @@ def tts_async():
     language = request.form.get("language", '')
     model = request.form.get("model", "")
 
-    if re.match(r'^[~`!@#$%^&*()_+=,./;\':\[\]{}<>?\\|"，。？；‘：“”’｛【】｝！·￥、\s\n\r -]*$', text):
+    if re.match(r'^[~`!@#$%^&*()_+=,./;\':[\]{}<>?\\|"，。？；：""\'｛【】｝！·￥、\s\n\r -]*$', text):
         return jsonify({"code": 1, "msg": "no text"})
     if not text or not voice or not language:
         return jsonify({"code": 1, "msg": "text/voice/language params lost"})
