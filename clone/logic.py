@@ -63,8 +63,59 @@ def ttsloop():
             if not os.path.exists(obj['voice']):
                 cfg.global_tts_result[obj['filename']] = f'参考声音不存:{obj["voice"]}'
                 continue
-            try:               
-                tts.tts_to_file(text=obj['text'], speaker_wav=obj['voice'], language=obj['language'], file_path=os.path.join(cfg.TTS_DIR, obj['filename']))
+            try:
+                text = obj['text']
+                # 长文本分段处理（XTTS限制约250字符）
+                if len(text) > 250:
+                    print(f"[tts][ttsloop]long text ({len(text)} chars), splitting...")
+                    segments = []
+                    # 检测是否为中文为主
+                    is_chinese = len(re.findall(r'[\u4e00-\u9fff]', text)) > len(text) * 0.3
+
+                    if is_chinese:
+                        # 中文按标点切分
+                        parts = re.split(r'([，。！？；：、])', text)
+                        current = ""
+                        for part in parts:
+                            if len(current) + len(part) > 250 and current:
+                                segments.append(current)
+                                current = part
+                            else:
+                                current += part
+                        if current:
+                            segments.append(current)
+                    else:
+                        # 英文按单词切分
+                        words = text.split()
+                        current = ""
+                        for word in words:
+                            if len(current) + len(word) + 1 > 250 and current:
+                                segments.append(current)
+                                current = word
+                            else:
+                                current = current + " " + word if current else word
+                        if current:
+                            segments.append(current)
+
+                    print(f"[tts][ttsloop]split into {len(segments)} segments")
+                    temp_files = []
+                    for idx, seg in enumerate(segments):
+                        print(f"[tts][ttsloop]segment {idx}: {seg[:50]}...")
+                        temp_file = os.path.join(cfg.TMP_DIR, f"temp_{obj['filename']}_{idx}.wav")
+                        tts.tts_to_file(text=seg, speaker_wav=obj['voice'], language=obj['language'], file_path=temp_file)
+                        temp_files.append(temp_file)
+
+                    merged = AudioSegment.empty()
+                    for tf in temp_files:
+                        merged += AudioSegment.from_wav(tf)
+                        try:
+                            os.unlink(tf)
+                        except:
+                            pass
+                    merged.export(os.path.join(cfg.TTS_DIR, obj['filename']), format="wav")
+                else:
+                    tts.tts_to_file(text=text, speaker_wav=obj['voice'], language=obj['language'], file_path=os.path.join(cfg.TTS_DIR, obj['filename']))
+
                 cfg.global_tts_result[obj['filename']] = 1
                 print(f"[tts][ttsloop]end: {obj=}")
             except Exception as e:
