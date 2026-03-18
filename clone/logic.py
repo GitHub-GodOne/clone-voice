@@ -166,18 +166,10 @@ def stsloop():
 
 # 实际启动tts合成的函数
 def create_tts(*, text, voice, language, filename, speed=1.0,model=""):
-    # 按日期创建子目录
-    date_dir = time.strftime("%Y%m%d")
-    date_path = os.path.join(cfg.TTS_DIR, date_dir)
-    os.makedirs(date_path, exist_ok=True)
-
-    # 添加时间戳避免重复
-    timestamp = str(int(time.time() * 1000))
-    name, ext = os.path.splitext(filename)
-    filename = f"{name}_{timestamp}{ext}"
-
-    absofilename = os.path.join(date_path, filename)
-    relative_path = os.path.join(date_dir, filename)
+    relative_path = filename
+    relative_dir = os.path.dirname(relative_path)
+    if relative_dir:
+        os.makedirs(os.path.join(cfg.TTS_DIR, relative_dir), exist_ok=True)
 
     try:
         print(f"[tts][create_ts] **{text}** {voice=},{model=}")
@@ -507,5 +499,4 @@ def run_tts(name):
         except Exception as e:
             #出错了
             print(f'run_tts:{name=},{str(e)}')
-
 

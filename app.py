@@ -79,7 +79,7 @@ def process_tts_text_list(text_list, voice, language, speed, model):
         os.makedirs(date_path, exist_ok=True)
         relative_filename = os.path.join(date_dir, filename)
 
-        rs = create_tts(text=t['text'], model=model, speed=speed, voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=filename)
+        rs = create_tts(text=t['text'], model=model, speed=speed, voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=relative_filename)
         if rs is not None:
             text_list[num]['result'] = rs
             num += 1
