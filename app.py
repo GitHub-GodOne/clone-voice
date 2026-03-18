@@ -60,6 +60,66 @@ def get_task_status(task_id):
     with task_lock:
         return task_status.get(task_id)
 
+def process_tts_text_list(text_list, voice, language, speed, model):
+    """公共TTS处理逻辑"""
+    num = 0
+    while num < len(text_list):
+        t = text_list[num]
+        t['text'] = t['text'].replace("\n", ' . ')
+
+        # 生成唯一文件名（带时间戳）
+        timestamp = str(int(time.time() * 1000))
+        md5_hash = hashlib.md5()
+        md5_hash.update(f"{t['text']}-{timestamp}".encode('utf-8'))
+        filename = md5_hash.hexdigest() + ".wav"
+
+        # 按日期创建子目录
+        date_dir = time.strftime("%Y%m%d")
+        date_path = os.path.join(TTS_DIR, date_dir)
+        os.makedirs(date_path, exist_ok=True)
+        relative_filename = os.path.join(date_dir, filename)
+
+        rs = create_tts(text=t['text'], model=model, speed=speed, voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=filename)
+        if rs is not None:
+            text_list[num]['result'] = rs
+            num += 1
+            continue
+
+        time_tmp = 0
+        target_wav = os.path.join(TTS_DIR, relative_filename)
+        msg = None
+        while relative_filename not in cfg.global_tts_result and not os.path.exists(target_wav):
+            time.sleep(3)
+            time_tmp += 3
+            if time_tmp > 3600:
+                msg = {"code": 1, "msg": f'{filename} error'}
+                text_list[num]['result'] = msg
+                num += 1
+                break
+        if msg is not None:
+            continue
+
+        if not os.path.exists(target_wav):
+            msg = {"code": 1, "msg": "not exists"}
+        else:
+            if speed != 1.0 and speed > 0 and speed <= 2.0:
+                speed_tmp = os.path.join(TMP_DIR, f'speed_{time.time()}.wav')
+                p = subprocess.run(['ffmpeg', '-hide_banner', '-ignore_unknown', '-y', '-i', target_wav, '-af', f"atempo={speed}", os.path.normpath(speed_tmp)], encoding="utf-8", capture_output=True)
+                if p.returncode != 0:
+                    msg = {"code": 1, "msg": str(p.stderr)}
+                    text_list[num]['result'] = msg
+                    num += 1
+                    continue
+                shutil.copy2(speed_tmp, target_wav)
+            msg = {"code": 0, "filename": target_wav, 'name': relative_filename}
+        try:
+            cfg.global_tts_result.pop(relative_filename)
+        except:
+            pass
+        text_list[num]['result'] = msg
+        num += 1
+    return text_list
+
 
 updatecache()
 
@@ -271,109 +331,44 @@ def apitts():
 # text:待合成文字
 # voice：声音文件
 # language:语言代码
-@app.route('/tts', methods=['GET', 'POST'])
+@app.route(‘/tts’, methods=[‘GET’, ‘POST’])
 def tts():
-    # 原始字符串
-    text = request.form.get("text","").strip()
-    voice = request.form.get("voice",'')
+    text = request.form.get(“text”,””).strip()
+    voice = request.form.get(“voice”,’’)
     speed = 1.0
     try:
-        speed = float(request.form.get("speed",1))
+        speed = float(request.form.get(“speed”,1))
     except:
         pass
-    language = request.form.get("language",'')
-    model = request.form.get("model","")
-    app.logger.info(f"[tts][tts]recev {text=}\n{voice=},{language=}\n")
+    language = request.form.get(“language”,’’)
+    model = request.form.get(“model”,””)
 
-    if re.match(r'^[~`!@#$%^&*()_+=,./;\':\[\]{}<>?\\|"，。？；‘：“”’｛【】｝！·￥、\s\n\r -]*$', text):
-        return jsonify({"code": 1, "msg": "no text"})
+    if re.match(r’^[~`!@#$%^&*()_+=,./;\’:\[\]{}<>?\\|”，。？；’：””’｛【】｝！·￥、\s\n\r -]*$’, text):
+        return jsonify({“code”: 1, “msg”: “no text”})
     if not text or not voice or not language:
-        return jsonify({"code": 1, "msg": "text/voice/language params lost"})
+        return jsonify({“code”: 1, “msg”: “text/voice/language params lost”})
 
-    # 判断是否是srt
     text_list = get_subtitle_from_srt(text)
-    app.logger.info(f"[tts][tts]{text_list=}")
     is_srt = True
-    # 不是srt格式,则按行分割
     if text_list is None:
         is_srt = False
-        text_list = []
-        for it in text.split("\n"):
-            text_list.append({"text": it.strip()})
-        app.logger.info(f"[tts][tts] its not srt")
+        text_list = [{“text”: it.strip()} for it in text.split(“\n”)]
 
-    num = 0
-    while num < len(text_list):
-        t = text_list[num]
-        # 换行符改成 .
-        t['text'] = t['text'].replace("\n", ' . ')
-        md5_hash = hashlib.md5()
-        md5_hash.update(f"{t['text']}-{voice}-{language}-{speed}-{model}".encode('utf-8'))
-        filename = md5_hash.hexdigest() + ".wav"
-        app.logger.info(f"[tts][tts]{filename=}")
-        # 合成语音
-        rs = create_tts(text=t['text'], model=model,speed=speed, voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=filename)
-        # 已有结果或错误，直接返回
-        if rs is not None:
-            text_list[num]['result'] = rs
-            num += 1
-            continue
-        # 循环等待 最多7200s
-        time_tmp = 0
-        # 生成的目标音频
-        target_wav = os.path.normpath(os.path.join(TTS_DIR, filename))
-        msg=None
-        while filename not in cfg.global_tts_result and not os.path.exists(target_wav):
-            time.sleep(3)
-            time_tmp += 3
-            if time_tmp % 30 == 0:
-                app.logger.info(f"[tts][tts]{time_tmp=},{filename=}")
-            if time_tmp>3600:
-                msg={"code": 1, "msg":f'{filename} error'}
-                text_list[num]['result'] = msg
-                num+=1
-                break
-        if msg is not None:
-            continue
-
-
-        # 当前行已完成合成
-        if not os.path.exists(target_wav):
-            msg = {"code": 1, "msg": "not exists"}
-        else:
-            if speed != 1.0 and speed > 0 and speed <= 2.0:
-                # 生成的加速音频
-                speed_tmp = os.path.join(TMP_DIR, f'speed_{time.time()}.wav')
-                p = subprocess.run(
-                    ['ffmpeg', '-hide_banner', '-ignore_unknown', '-y', '-i', target_wav, '-af', f"atempo={speed}",
-                     os.path.normpath(speed_tmp)], encoding="utf-8", capture_output=True)
-                if p.returncode != 0:
-                    return jsonify({"code": 1, "msg": str(p.stderr)})
-                shutil.copy2(speed_tmp, target_wav)
-            msg = {"code": 0, "filename": target_wav, 'name': filename}
-        app.logger.info(f"[tts][tts] {filename=},{msg=}")
-        try:
-            cfg.global_tts_result.pop(filename)
-        except:
-            pass
-        text_list[num]['result'] = msg
-        app.logger.info(f"[tts][tts]{num=}")
-        num += 1
-
+    text_list = process_tts_text_list(text_list, voice, language, speed, model)
     filename, errors = merge_audio_segments(text_list, is_srt=is_srt)
-    app.logger.info(f"[tts][tts]is srt，{filename=},{errors=}")
+
     if filename and os.path.exists(filename) and os.path.getsize(filename) > 0:
-        basename = os.path.basename(filename)
+        # 提取相对路径用于URL
+        rel_path = filename.replace(TTS_DIR + os.sep, ‘’).replace(‘\\’, ‘/’)
         res = {
-            "code": 0,
-            "filename": filename,
-            "name": basename,
-            "msg": errors,
-            "url": f'{respon_host}/static/ttslist/{basename}'
+            “code”: 0,
+            “filename”: filename,
+            “name”: os.path.basename(filename),
+            “msg”: errors,
+            “url”: f’{respon_host}/static/ttslist/{rel_path}’
         }
     else:
-        res = {"code": 1, "msg": f"error:{filename=},{errors=}"}
-    app.logger.info(f"[tts][tts]end result:{res=}")
+        res = {“code”: 1, “msg”: f”error:{filename=},{errors=}”}
     return jsonify(res)
 
 
@@ -506,68 +501,19 @@ def tts_async():
             is_srt = True
             if text_list is None:
                 is_srt = False
-                text_list = []
-                for it in text.split("\n"):
-                    text_list.append({"text": it.strip()})
+                text_list = [{"text": it.strip()} for it in text.split("\n")]
 
-            num = 0
-            while num < len(text_list):
-                t = text_list[num]
-                t['text'] = t['text'].replace("\n", ' . ')
-                md5_hash = hashlib.md5()
-                md5_hash.update(f"{t['text']}-{voice}-{language}-{speed}-{model}".encode('utf-8'))
-                filename = md5_hash.hexdigest() + ".wav"
-
-                rs = create_tts(text=t['text'], model=model, speed=speed,
-                                voice=os.path.join(cfg.VOICE_DIR, voice), language=language, filename=filename)
-                if rs is not None:
-                    text_list[num]['result'] = rs
-                    num += 1
-                    continue
-
-                time_tmp = 0
-                target_wav = os.path.normpath(os.path.join(TTS_DIR, filename))
-                msg = None
-                while filename not in cfg.global_tts_result and not os.path.exists(target_wav):
-                    time.sleep(3)
-                    time_tmp += 3
-                    if time_tmp > 3600:
-                        msg = {"code": 1, "msg": f'{filename} error'}
-                        text_list[num]['result'] = msg
-                        num += 1
-                        break
-                if msg is not None:
-                    continue
-
-                if not os.path.exists(target_wav):
-                    msg = {"code": 1, "msg": "not exists"}
-                else:
-                    if speed != 1.0 and speed > 0 and speed <= 2.0:
-                        speed_tmp = os.path.join(TMP_DIR, f'speed_{time.time()}.wav')
-                        p = subprocess.run(
-                            ['ffmpeg', '-hide_banner', '-ignore_unknown', '-y', '-i', target_wav, '-af',
-                             f"atempo={speed}", os.path.normpath(speed_tmp)], encoding="utf-8", capture_output=True)
-                        if p.returncode != 0:
-                            update_task_status(task_id, 'failed', error=str(p.stderr))
-                            return
-                        shutil.copy2(speed_tmp, target_wav)
-                    msg = {"code": 0, "filename": target_wav, 'name': filename}
-                try:
-                    cfg.global_tts_result.pop(filename)
-                except:
-                    pass
-                text_list[num]['result'] = msg
-                num += 1
-
+            text_list = process_tts_text_list(text_list, voice, language, speed, model)
             filename, errors = merge_audio_segments(text_list, is_srt=is_srt)
+
             if filename and os.path.exists(filename) and os.path.getsize(filename) > 0:
-                basename = os.path.basename(filename)
+                rel_path = filename.replace(TTS_DIR + os.sep, '').replace('\\', '/')
                 result = {
                     "code": 0,
                     "filename": filename,
-                    "name": basename,
+                    "name": os.path.basename(filename),
                     "msg": errors,
-                    "url": f'{respon_host}/static/ttslist/{basename}'
+                    "url": f'{respon_host}/static/ttslist/{rel_path}'
                 }
                 update_task_status(task_id, 'completed', result=result)
             else:

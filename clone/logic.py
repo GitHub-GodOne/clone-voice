@@ -99,9 +99,10 @@ def ttsloop():
 
                     print(f"[tts][ttsloop]split into {len(segments)} segments")
                     temp_files = []
+                    base_filename = os.path.basename(obj['filename'])
                     for idx, seg in enumerate(segments):
                         print(f"[tts][ttsloop]segment {idx}: {seg[:50]}...")
-                        temp_file = os.path.join(cfg.TMP_DIR, f"temp_{obj['filename']}_{idx}.wav")
+                        temp_file = os.path.join(cfg.TMP_DIR, f"temp_{base_filename}_{idx}.wav")
                         tts.tts_to_file(text=seg, speaker_wav=obj['voice'], language=obj['language'], file_path=temp_file)
                         temp_files.append(temp_file)
 
