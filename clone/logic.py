@@ -9,6 +9,7 @@ import time
 import webbrowser
 
 import aiohttp
+import pysbd
 import requests
 import torch
 import torchaudio
@@ -22,6 +23,78 @@ from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
 from dotenv import load_dotenv
 load_dotenv()
+
+_TTS_CONTENT_RE = re.compile(r"[0-9A-Za-z\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]")
+_TTS_EN_SEGMENTER = pysbd.Segmenter(language="en", clean=True)
+
+
+def normalize_tts_text(text):
+    """Normalize fragile punctuation patterns before feeding text into XTTS."""
+    if not text:
+        return ""
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("…", "...")
+    # Avoid a standalone '"...' sentence after closing quotes, which XTTS may hallucinate on.
+    text = re.sub(r'([.!?]["”’\')\]]?)\s*(?:\.{3,})\s+(?=[A-Za-z])', r"\1 ", text)
+    text = re.sub(r"\.{4,}", "...", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def has_tts_content(text):
+    return bool(text and _TTS_CONTENT_RE.search(text))
+
+
+def split_long_tts_segment(text):
+    segments = []
+    is_chinese = len(re.findall(r"[\u4e00-\u9fff]", text)) > len(text) * 0.3
+
+    if is_chinese:
+        parts = re.split(r"([，。！？；：、])", text)
+        current = ""
+        for part in parts:
+            if len(current) + len(part) > 250 and current:
+                segments.append(current)
+                current = part
+            else:
+                current += part
+        if current:
+            segments.append(current)
+    else:
+        words = text.split()
+        current = ""
+        for word in words:
+            if len(current) + len(word) + 1 > 250 and current:
+                segments.append(current)
+                current = word
+            else:
+                current = current + " " + word if current else word
+        if current:
+            segments.append(current)
+
+    return [seg.strip() for seg in segments if has_tts_content(seg)]
+
+
+def prepare_tts_segments(text):
+    text = normalize_tts_text(text)
+    if not has_tts_content(text):
+        return []
+
+    raw_segments = _TTS_EN_SEGMENTER.segment(text)
+    if not raw_segments:
+        raw_segments = [text]
+
+    segments = []
+    for seg in raw_segments:
+        seg = seg.strip()
+        if not has_tts_content(seg):
+            continue
+        if len(seg) > 250:
+            segments.extend(split_long_tts_segment(seg))
+        else:
+            segments.append(seg)
+    return segments
 
 def updatecache():
     # 禁止更新，避免无代理时报错
@@ -64,39 +137,12 @@ def ttsloop():
                 cfg.global_tts_result[obj['filename']] = f'参考声音不存:{obj["voice"]}'
                 continue
             try:
-                text = obj['text']
-                # 长文本分段处理（XTTS限制约250字符）
-                if len(text) > 250:
-                    print(f"[tts][ttsloop]long text ({len(text)} chars), splitting...")
-                    segments = []
-                    # 检测是否为中文为主
-                    is_chinese = len(re.findall(r'[\u4e00-\u9fff]', text)) > len(text) * 0.3
+                text = normalize_tts_text(obj['text'])
+                segments = prepare_tts_segments(text)
+                if not segments:
+                    raise ValueError("No spoken content after text normalization.")
 
-                    if is_chinese:
-                        # 中文按标点切分
-                        parts = re.split(r'([，。！？；：、])', text)
-                        current = ""
-                        for part in parts:
-                            if len(current) + len(part) > 250 and current:
-                                segments.append(current)
-                                current = part
-                            else:
-                                current += part
-                        if current:
-                            segments.append(current)
-                    else:
-                        # 英文按单词切分
-                        words = text.split()
-                        current = ""
-                        for word in words:
-                            if len(current) + len(word) + 1 > 250 and current:
-                                segments.append(current)
-                                current = word
-                            else:
-                                current = current + " " + word if current else word
-                        if current:
-                            segments.append(current)
-
+                if len(segments) > 1:
                     print(f"[tts][ttsloop]split into {len(segments)} segments")
                     temp_files = []
                     base_filename = os.path.basename(obj['filename'])
@@ -115,7 +161,7 @@ def ttsloop():
                             pass
                     merged.export(os.path.join(cfg.TTS_DIR, obj['filename']), format="wav")
                 else:
-                    tts.tts_to_file(text=text, speaker_wav=obj['voice'], language=obj['language'], file_path=os.path.join(cfg.TTS_DIR, obj['filename']))
+                    tts.tts_to_file(text=segments[0], speaker_wav=obj['voice'], language=obj['language'], file_path=os.path.join(cfg.TTS_DIR, obj['filename']))
 
                 cfg.global_tts_result[obj['filename']] = 1
                 print(f"[tts][ttsloop]end: {obj=}")
@@ -172,6 +218,7 @@ def create_tts(*, text, voice, language, filename, speed=1.0,model=""):
         os.makedirs(os.path.join(cfg.TTS_DIR, relative_dir), exist_ok=True)
 
     try:
+        text = normalize_tts_text(text)
         print(f"[tts][create_ts] **{text}** {voice=},{model=}")
         if not model or model =="default":
             cfg.q.put({"voice": voice, "text": text,"speed":speed, "language": language, "filename": relative_path})
@@ -499,4 +546,3 @@ def run_tts(name):
         except Exception as e:
             #出错了
             print(f'run_tts:{name=},{str(e)}')
-
