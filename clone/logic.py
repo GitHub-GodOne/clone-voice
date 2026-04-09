@@ -26,18 +26,34 @@ load_dotenv()
 
 _TTS_CONTENT_RE = re.compile(r"[0-9A-Za-z\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]")
 _TTS_EN_SEGMENTER = pysbd.Segmenter(language="en", clean=True)
+_TTS_CJK_PUNCT_RE = re.compile(r"([，。！？；：、])")
+_TTS_QUOTE_TRANSLATION = str.maketrans({
+    "“": '"',
+    "”": '"',
+    "‘": "'",
+    "’": "'",
+})
 
 
-def normalize_tts_text(text):
+def is_english_tts(language):
+    return str(language or "").lower().startswith("en")
+
+
+def normalize_tts_text(text, language=None):
     """Normalize fragile punctuation patterns before feeding text into XTTS."""
     if not text:
         return ""
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.translate(_TTS_QUOTE_TRANSLATION)
     text = text.replace("…", "...")
+    # XTTS is notably unstable on quote-ended sentence boundaries like `spirit.' Breathe`.
+    text = re.sub(r'([.!?])["\']+\s+(?=[A-Z])', r"\1 ", text)
     # Avoid a standalone '"...' sentence after closing quotes, which XTTS may hallucinate on.
     text = re.sub(r'([.!?]["”’\')\]]?)\s*(?:\.{3,})\s+(?=[A-Za-z])', r"\1 ", text)
     text = re.sub(r"\.{4,}", "...", text)
+    if is_english_tts(language):
+        text = re.sub(r"\s*[—–]+\s*", ", ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -51,7 +67,7 @@ def split_long_tts_segment(text):
     is_chinese = len(re.findall(r"[\u4e00-\u9fff]", text)) > len(text) * 0.3
 
     if is_chinese:
-        parts = re.split(r"([，。！？；：、])", text)
+        parts = _TTS_CJK_PUNCT_RE.split(text)
         current = ""
         for part in parts:
             if len(current) + len(part) > 250 and current:
@@ -76,13 +92,16 @@ def split_long_tts_segment(text):
     return [seg.strip() for seg in segments if has_tts_content(seg)]
 
 
-def prepare_tts_segments(text):
-    text = normalize_tts_text(text)
+def prepare_tts_segments(text, language=None):
+    text = normalize_tts_text(text, language)
     if not has_tts_content(text):
         return []
 
-    raw_segments = _TTS_EN_SEGMENTER.segment(text)
-    if not raw_segments:
+    if is_english_tts(language):
+        raw_segments = _TTS_EN_SEGMENTER.segment(text)
+        if not raw_segments:
+            raw_segments = [text]
+    else:
         raw_segments = [text]
 
     segments = []
@@ -95,6 +114,20 @@ def prepare_tts_segments(text):
         else:
             segments.append(seg)
     return segments
+
+
+def merge_wav_files(temp_files, output_path):
+    merged = AudioSegment.empty()
+    try:
+        for temp_file in temp_files:
+            merged += AudioSegment.from_wav(temp_file)
+        merged.export(output_path, format="wav")
+    finally:
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
 
 def updatecache():
     # 禁止更新，避免无代理时报错
@@ -137,8 +170,8 @@ def ttsloop():
                 cfg.global_tts_result[obj['filename']] = f'参考声音不存:{obj["voice"]}'
                 continue
             try:
-                text = normalize_tts_text(obj['text'])
-                segments = prepare_tts_segments(text)
+                text = normalize_tts_text(obj['text'], obj.get('language'))
+                segments = prepare_tts_segments(text, obj.get('language'))
                 if not segments:
                     raise ValueError("No spoken content after text normalization.")
 
@@ -152,14 +185,7 @@ def ttsloop():
                         tts.tts_to_file(text=seg, speaker_wav=obj['voice'], language=obj['language'], file_path=temp_file)
                         temp_files.append(temp_file)
 
-                    merged = AudioSegment.empty()
-                    for tf in temp_files:
-                        merged += AudioSegment.from_wav(tf)
-                        try:
-                            os.unlink(tf)
-                        except:
-                            pass
-                    merged.export(os.path.join(cfg.TTS_DIR, obj['filename']), format="wav")
+                    merge_wav_files(temp_files, os.path.join(cfg.TTS_DIR, obj['filename']))
                 else:
                     tts.tts_to_file(text=segments[0], speaker_wav=obj['voice'], language=obj['language'], file_path=os.path.join(cfg.TTS_DIR, obj['filename']))
 
@@ -218,7 +244,7 @@ def create_tts(*, text, voice, language, filename, speed=1.0,model=""):
         os.makedirs(os.path.join(cfg.TTS_DIR, relative_dir), exist_ok=True)
 
     try:
-        text = normalize_tts_text(text)
+        text = normalize_tts_text(text, language)
         print(f"[tts][create_ts] **{text}** {voice=},{model=}")
         if not model or model =="default":
             cfg.q.put({"voice": voice, "text": text,"speed":speed, "language": language, "filename": relative_path})
@@ -524,25 +550,42 @@ def run_tts(name):
             continue
         try:
             print(f'{obj=}')
-            lang, tts_text, speaker_audio_file=obj['language'],obj['text'],os.path.join(cfg.MYMODEL_DIR,name,'base.wav')
+            lang, tts_text, speaker_audio_file = obj['language'], obj['text'], os.path.join(cfg.MYMODEL_DIR, name, 'base.wav')
+            segments = prepare_tts_segments(tts_text, lang)
+            if not segments:
+                raise ValueError("No spoken content after text normalization.")
             gpt_cond_latent, speaker_embedding = cfg.MYMODEL_OBJS[name].get_conditioning_latents(audio_path=speaker_audio_file, gpt_cond_len=cfg.MYMODEL_OBJS[name].config.gpt_cond_len, max_ref_length=cfg.MYMODEL_OBJS[name].config.max_ref_len, sound_norm_refs=cfg.MYMODEL_OBJS[name].config.sound_norm_refs)
-            out = cfg.MYMODEL_OBJS[name].inference(
-                text=tts_text,
-                language=lang,
-                gpt_cond_latent=gpt_cond_latent,
-                speaker_embedding=speaker_embedding,
-                temperature=cfg.MYMODEL_OBJS[name].config.temperature, # Add custom parameters here
-                length_penalty=cfg.MYMODEL_OBJS[name].config.length_penalty,
-                repetition_penalty=cfg.MYMODEL_OBJS[name].config.repetition_penalty,
-                top_k=cfg.MYMODEL_OBJS[name].config.top_k,
-                top_p=cfg.MYMODEL_OBJS[name].config.top_p,
-            )
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fp:
-                out["wav"] = torch.tensor(out["wav"]).unsqueeze(0)
-                out_path = fp.name
-                torchaudio.save(out_path, out["wav"], 24000)
-                shutil.copy2(out_path,os.path.join(cfg.TTS_DIR, obj['filename']))
+            temp_files = []
+            for idx, seg in enumerate(segments):
+                print(f"[tts][custom]segment {idx}: {seg[:50]}...")
+                out = cfg.MYMODEL_OBJS[name].inference(
+                    text=seg,
+                    language=lang,
+                    gpt_cond_latent=gpt_cond_latent,
+                    speaker_embedding=speaker_embedding,
+                    temperature=cfg.MYMODEL_OBJS[name].config.temperature,
+                    length_penalty=cfg.MYMODEL_OBJS[name].config.length_penalty,
+                    repetition_penalty=cfg.MYMODEL_OBJS[name].config.repetition_penalty,
+                    top_k=cfg.MYMODEL_OBJS[name].config.top_k,
+                    top_p=cfg.MYMODEL_OBJS[name].config.top_p,
+                )
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fp:
+                    out["wav"] = torch.tensor(out["wav"]).unsqueeze(0)
+                    out_path = fp.name
+                    torchaudio.save(out_path, out["wav"], 24000)
+                    temp_files.append(out_path)
+
+            output_path = os.path.join(cfg.TTS_DIR, obj['filename'])
+            if len(temp_files) == 1:
+                shutil.copy2(temp_files[0], output_path)
+                try:
+                    os.unlink(temp_files[0])
+                except Exception:
+                    pass
+            else:
+                merge_wav_files(temp_files, output_path)
             cfg.global_tts_result[obj['filename']] = 1
         except Exception as e:
             #出错了
             print(f'run_tts:{name=},{str(e)}')
+            cfg.global_tts_result[obj['filename']] = str(e)
